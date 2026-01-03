@@ -1,13 +1,14 @@
-import React, { createContext, useContext, useState, ReactNode } from "react";
-import { demoAccounts } from "@/lib/mockData";
+import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
+import { apiClient } from "@/lib/api";
 
 type UserRole = "student" | "teacher";
 
 interface User {
+  id: number;
   email: string;
   name: string;
   role: UserRole;
-  id?: string;
+  student_id?: string;
 }
 
 interface AuthContextType {
@@ -20,72 +21,54 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Store active codes in memory (in real app, this would be in database)
-const activeCodes: Map<string, { expiresAt: Date }> = new Map();
-
-export const addAccessCode = (code: string) => {
-  const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour validity
-  activeCodes.set(code, { expiresAt });
-};
-
-export const validateCode = (code: string): boolean => {
-  const codeData = activeCodes.get(code);
-  if (!codeData) return false;
-  if (new Date() > codeData.expiresAt) {
-    activeCodes.delete(code);
-    return false;
-  }
-  return true;
-};
-
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(() => {
+    // Load user from localStorage on mount
+    const savedUser = localStorage.getItem("user");
+    return savedUser ? JSON.parse(savedUser) : null;
+  });
+
+  useEffect(() => {
+    // Save user to localStorage whenever it changes
+    if (user) {
+      localStorage.setItem("user", JSON.stringify(user));
+    } else {
+      localStorage.removeItem("user");
+    }
+  }, [user]);
 
   const login = async (email: string, password: string): Promise<boolean> => {
-    // Check teacher account
-    if (
-      email === demoAccounts.teacher.email &&
-      password === demoAccounts.teacher.password
-    ) {
+    try {
+      const userData = await apiClient.login(email, password);
       setUser({
-        email: demoAccounts.teacher.email,
-        name: demoAccounts.teacher.name,
-        role: "teacher",
+        id: userData.id,
+        email: userData.email,
+        name: userData.name,
+        role: userData.role as UserRole,
+        student_id: userData.student_id,
       });
       return true;
+    } catch (error) {
+      console.error("Login error:", error);
+      return false;
     }
-
-    // Check student accounts
-    const student = demoAccounts.students.find(
-      (s) => s.email === email && s.password === password
-    );
-    if (student) {
-      setUser({
-        email: student.email,
-        name: student.name,
-        role: "student",
-        id: student.id,
-      });
-      return true;
-    }
-
-    return false;
   };
 
   const loginWithCode = async (code: string, studentId: string): Promise<boolean> => {
-    if (!validateCode(code)) return false;
-    
-    const student = demoAccounts.students.find((s) => s.id === studentId);
-    if (student) {
+    try {
+      const userData = await apiClient.loginWithCode(code, studentId);
       setUser({
-        email: student.email,
-        name: student.name,
-        role: "student",
-        id: student.id,
+        id: userData.id,
+        email: userData.email,
+        name: userData.name,
+        role: userData.role as UserRole,
+        student_id: userData.student_id,
       });
       return true;
+    } catch (error) {
+      console.error("Code login error:", error);
+      return false;
     }
-    return false;
   };
 
   const logout = () => {
